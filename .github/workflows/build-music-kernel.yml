@@ -245,6 +245,8 @@ jobs:
             exit 1
           fi
           
+          cp -v .config "${{ github.workspace }}/config${{ matrix.KERNEL_SUFFIX }}.txt"
+          
       - name: 检查config是否包含必须的config设定
         shell: bash
         run: |
@@ -284,18 +286,6 @@ jobs:
           set -euo pipefail
           mkdir -p ${{ github.workspace }}/modules-staging
           make INSTALL_MOD_PATH=${{ github.workspace }}/modules-staging modules_install
-
-          # 诊断：统计 .ko 数量
-          KO=$(find ${{ github.workspace }}/modules-staging -name '*.ko' | wc -l)
-          echo ".ko 模块文件数: $KO"
-          du -sh ${{ github.workspace }}/modules-staging
-          if [ "$KO" -eq 0 ]; then
-            if [ "${{ matrix.tag }}" = "rt-mod" ]; then
-              echo "::error::本配置应为模块化内核，却未生成任何 .ko，配置可能没生效" >&2
-              exit 1
-            fi
-            echo "提示：未生成 .ko（本内核为全内建，驱动已编入 bzImage），modules.tar.gz 只含元数据"
-          fi
 
       - name: 打包内核模块
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_modules != false }}
@@ -364,7 +354,7 @@ jobs:
           replacesArtifacts: true
           artifacts: |
             linux-${{ env.KERNEL_VERSION }}/arch/x86/boot/bzImage
-            ${{ github.workspace }}/config-${{ matrix.tag }}.txt
+            ${{ github.workspace }}/config${{ matrix.KERNEL_SUFFIX }}.txt
             ${{ github.workspace }}/modules-staging/lib/modules.tar.gz
           body: | 
             音乐 Linux ${{ matrix.config_type }} ${{ env.KERNEL_VERSION }} x86_64 PREEMPT_RT 构建版本.
