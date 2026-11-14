@@ -233,13 +233,20 @@ jobs:
           fi
           
       - name: 检查config是否包含必须的config设定
+        shell: bash
         run: |
+          #set -o pipefail 的作用
+          #打开这个选项后，管道的退出码改为：只要管道中任意一个命令返回非零，整条管道就返回非零（具体取最后一个失败命令的退出码；都成功则为 0）。  
+          #没有set -o pipefail （只能对最后测试有反应）只要最后一个不是0 前面就是有多少个非零也不起作用
+          #如果不放心 PIPESTATUS 的写法，可以用 set -o pipefail，让管道整体在任一环节失败时返回非零，然后直接让步骤自然退出，不需要手动 exit：
+          set -o pipefail
           cp linux-${KERNEL_VERSION}/.config .
-          #sudo apt-get update && sudo apt-get install -y dos2unix
+          sudo apt-get update && sudo apt-get install -y dos2unix
           dos2unix ${{ matrix.Verify-Config }}
           chmod +x ${{ matrix.Verify-Config }}
           ./${{ matrix.Verify-Config }} .config | tee verify.log
-          exit ${PIPESTATUS[0]}}
+          #没有set -o pipefail 时还要用下面的语句另外 bash -e 模式下，./脚本 | tee 这条管道里如果脚本返回非零，-e 本身不会立刻中止（因为管道整体退出码是 tee 的 0），所以后面的 exit ${PIPESTATUS[0]} 是必要的
+          #exit ${PIPESTATUS[0]}
 
       - name: 仅构建配置
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_modules == false }}
