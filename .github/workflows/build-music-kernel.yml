@@ -113,14 +113,6 @@ jobs:
               git \
               ccache dos2unix
 
-      - name: 配置 ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: linux-music-x86_64-${{ runner.os }}-${{ github.ref }}
-          restore-keys: |
-            linux-music-x86_64-${{ runner.os }}-
-
       - name: 下载内核源码
         run: |
           set -euo pipefail
@@ -265,8 +257,6 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_modules != false }}
         run: |
           cd "linux-${KERNEL_VERSION}"
-          export CC="ccache gcc"
-          ccache -M 3G
           make ARCH=x86 -j"${nproc}" bzImage modules
           
       # 安装编译好的内核模块到暂存目录
