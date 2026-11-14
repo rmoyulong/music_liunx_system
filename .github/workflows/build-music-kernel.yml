@@ -160,8 +160,8 @@ jobs:
           echo "defconfig 条目数: $COUNT0"
           
           # 2) 合并我们的增量配置片段（只写需要修改/额外开启的选项）
-          ./scripts/kconfig/merge_config.sh -m -O . .config "FRAGMENT"
-          #./scripts/kconfig/merge_config.sh .config "FRAGMENT"
+          ./scripts/kconfig/merge_config.sh -m -O . .config "$FRAGMENT"
+          #./scripts/kconfig/merge_config.sh .config "$FRAGMENT"
           
           # 3) 禁用证书相关选项，避免构建时报签名错误
           ./scripts/config --set-str SYSTEM_TRUSTED_KEYS ""
