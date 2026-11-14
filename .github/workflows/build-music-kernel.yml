@@ -142,8 +142,10 @@ jobs:
       - name: 加载最终内核配置
         run: |
           cd "linux-${KERNEL_VERSION}"
-          FRAGMENT="${{ github.workspace }}/${{ env.KERNEL_PATH }}"
-          cp "$FRAGMENT/${{ matrix.KERNEL_CONFIG }}" FRAGMENT.config
+          FRAGMENT="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ matrix.KERNEL_CONFIG }}"
+          test -f "$FRAGMENT" || { echo "::error::缺少配置片段 $FRAGMENT"; exit 1; }
+          cp "$FRAGMENT" old.config
+          
  
           # 1) 从官方 x86_64 默认配置起步（约 1700 个 =y/=m 条目，完整可启动）
           make x86_64_defconfig
@@ -151,8 +153,8 @@ jobs:
           echo "defconfig 条目数: $COUNT0"
           
           # 2) 合并我们的增量配置片段（只写需要修改/额外开启的选项）
-          ./scripts/kconfig/merge_config.sh -m -O . .config FRAGMENT.config
-          #scripts/kconfig/merge_config.sh .config FRAGMENT.config
+          ./scripts/kconfig/merge_config.sh -m -O . .config old.config
+          #scripts/kconfig/merge_config.sh .config old.config
           
           # 3) 禁用证书相关选项，避免构建时报签名错误
           ./scripts/config --set-str SYSTEM_TRUSTED_KEYS ""
