@@ -142,8 +142,8 @@ jobs:
       - name: 加载最终内核配置
         run: |
           cd "linux-${KERNEL_VERSION}"
-          MIGRATION_DIR="$GITHUB_WORKSPACE/${KERNEL_PATH}"
-          cp "$MIGRATION_DIR/${{ matrix.KERNEL_CONFIG }}" FRAGMENT.config
+          FRAGMENT="${{ github.workspace }}/${{ env.KERNEL_PATH }}"
+          cp "$FRAGMENT/${{ matrix.KERNEL_CONFIG }}" FRAGMENT.config
  
           # 1) 从官方 x86_64 默认配置起步（约 1700 个 =y/=m 条目，完整可启动）
           make x86_64_defconfig
@@ -151,8 +151,8 @@ jobs:
           echo "defconfig 条目数: $COUNT0"
           
           # 2) 合并我们的增量配置片段（只写需要修改/额外开启的选项）
-          #./scripts/kconfig/merge_config.sh -m -O . .config FRAGMENT.config
-          scripts/kconfig/merge_config.sh .config FRAGMENT.config
+          ./scripts/kconfig/merge_config.sh -m -O . .config FRAGMENT.config
+          #scripts/kconfig/merge_config.sh .config FRAGMENT.config
           
           # 3) 禁用证书相关选项，避免构建时报签名错误
           ./scripts/config --set-str SYSTEM_TRUSTED_KEYS ""
@@ -175,10 +175,15 @@ jobs:
           ./scripts/config --enable MODULES
           ./scripts/config --enable MODULE_UNLOAD
           
-          # PREEMPT_RT.
-          
-          ./scripts/config --enable PREEMPT_RT
-          ./scripts/config --enable HIGH_RES_TIMERS
+          # 设置关键 RT 选项
+          ./scripts/config -e PREEMPT_RT
+          ./scripts/config -d PREEMPT_NONE
+          ./scripts/config -d PREEMPT_VOLUNTARY
+          ./scripts/config -d PREEMPT
+          ./scripts/config -e IRQ_FORCED_THREADING
+          ./scripts/config -e HIGH_RES_TIMERS
+          ./scripts/config -d DEBUG_KERNEL
+          ./scripts/config -d FTRACE
           
           # ALSA core: built-in.
           
@@ -209,7 +214,7 @@ jobs:
           # Set suffix ONLY in .config.
           # Do NOT pass LOCALVERSION to make later.
 
-          ./scripts/config --set-str LOCALVERSION "$KERNEL_SUFFIX"
+          ./scripts/config --set-str LOCALVERSION "${{ matrix.KERNEL_SUFFIX }}"
           ./scripts/config --disable LOCALVERSION_AUTO
           
           echo
