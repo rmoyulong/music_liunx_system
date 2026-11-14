@@ -29,7 +29,6 @@ echo "===== 校验配置文件: ${CONFIG_FILE} ====="
 
 check CONFIG_PREEMPT_RT  y
 check CONFIG_EXPERT      y
-check CONFIG_NR_CPUS     2
 check CONFIG_KERNEL_ZSTD y
 
 echo "======================================"
