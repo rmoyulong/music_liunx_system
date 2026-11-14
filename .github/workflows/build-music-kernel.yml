@@ -271,109 +271,85 @@ jobs:
       - name: 检查编译前磁盘空间
         run: df -h
         
-      - name: 构建内核镜像及模块
+
+      - name: 构建内核与模块
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_modules != false }}
-        run: |
-          cd "linux-${KERNEL_VERSION}"
-          make ARCH=x86 -j"${nproc}" bzImage modules
-          
-      # 安装编译好的内核模块到暂存目录
-      - name: 安装内核模块
+        working-directory: linux-${{ env.KERNEL_VERSION }}
+        run: make -j$(nproc) bzImage modules
+
+      - name: 将模块安装至暂存目录
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_modules != false }}
-        shell: bash
+        working-directory: linux-${{ env.KERNEL_VERSION }}
         run: |
-          set -Eeuo pipefail
+          set -euo pipefail
+          mkdir -p ${{ github.workspace }}/modules-staging
+          make INSTALL_MOD_PATH=${{ github.workspace }}/modules-staging modules_install
 
-          KERNEL_DIR="$GITHUB_WORKSPACE/linux-${KERNEL_VERSION}"
-          MODULES_STAGING="$GITHUB_WORKSPACE/modules-staging"
-
-          KERNEL_RELEASE=$(make -s -C "$KERNEL_DIR" ARCH=x86 kernelrelease)
-
-          echo "Kernel release: $KERNEL_RELEASE"
-          echo "Modules staging: $MODULES_STAGING"
-
-          make -C "$KERNEL_DIR" \
-            ARCH=x86 \
-            INSTALL_MOD_PATH="$MODULES_STAGING" \
-            modules_install
-
-          # 供后续步骤使用
-          echo "KERNEL_RELEASE=$KERNEL_RELEASE" >> "$GITHUB_ENV"
-          echo "MODULES_STAGING=$MODULES_STAGING" >> "$GITHUB_ENV"
-
-          echo "=== Installed modules ==="
-          ls -lah "$MODULES_STAGING/lib/modules/$KERNEL_RELEASE"
-
-      # 打包内核模块
-      - name: 打包内核模块
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_modules != false }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          MODULE_DIR="$MODULES_STAGING/lib/modules/$KERNEL_RELEASE"
-          RELEASE_DIR="$GITHUB_WORKSPACE/release-files"
-
-          mkdir -p "$RELEASE_DIR"
-
-          if [ ! -d "$MODULE_DIR" ]; then
-            echo "::error::Module directory not found: $MODULE_DIR"
-            exit 1
+          # 诊断：统计 .ko 数量
+          KO=$(find ${{ github.workspace }}/modules-staging -name '*.ko' | wc -l)
+          echo ".ko 模块文件数: $KO"
+          du -sh ${{ github.workspace }}/modules-staging
+          if [ "$KO" -eq 0 ]; then
+            if [ "${{ matrix.tag }}" = "rt-mod" ]; then
+              echo "::error::本配置应为模块化内核，却未生成任何 .ko，配置可能没生效" >&2
+              exit 1
+            fi
+            echo "提示：未生成 .ko（本内核为全内建，驱动已编入 bzImage），modules.tar.gz 只含元数据"
           fi
 
-          echo "=== Module directory ==="
-          du -sh "$MODULE_DIR"
-
-          echo "=== Disk space ==="
-          df -h "$GITHUB_WORKSPACE"
-
-          # 保留 ${KERNEL_VERSION} 目录层级
-          tar --numeric-owner -zcf "$RELEASE_DIR/modules.tar.gz" \
-            -C "$MODULES_STAGING/lib/modules" \
-            "$KERNEL_RELEASE"
-
-          echo "=== Package result ==="
-          ls -lh "$RELEASE_DIR/modules.tar.gz"
-
-      # 准备 Release 文件
-      - name: 准备发布文件
+      - name: 打包内核模块
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_modules != false }}
-        shell: bash
         run: |
-          set -Eeuo pipefail
+          set -euo pipefail
+          MODROOT="${{ github.workspace }}/modules-staging/lib/modules"
+          [ -d "$MODROOT" ] || { echo "ERROR: 模块暂存目录不存在: $MODROOT" >&2; exit 1; }
+          cd "$MODROOT"
 
-          KERNEL_DIR="$GITHUB_WORKSPACE/linux-${KERNEL_VERSION}"
-          RELEASE_DIR="$GITHUB_WORKSPACE/release-files"
+          # 版本目录不用 "ls -d */ | head -1" 碰运气：
+          # 目录按字母序排列时 "7.3.3-rt-mod" 会排在 "7.3.3-rt" 前面，
+          # 一旦同名残留多个版本就会静默取错。这里逐个校验格式，只认唯一命中。
+          KVER_DIR=""
+          for d in */; do
+            [ -d "$d" ] || continue
+            name="${d%/}"
+            case "$name" in
+              [0-9]*.[0-9]*)
+                if [ -n "$KVER_DIR" ]; then
+                  echo "ERROR: 发现多个版本目录（$KVER_DIR 与 $name），无法判断该打包哪个" >&2
+                  ls -la
+                  exit 1
+                fi
+                KVER_DIR="$name"
+                ;;
+            esac
+          done
+          [ -n "$KVER_DIR" ] || { echo "ERROR: 未能识别版本目录" >&2; ls -la; exit 1; }
+          echo "模块目录: $KVER_DIR"
+          # build / source / vmlinux 等位于版本子目录内部
+          sudo rm -f "$KVER_DIR/build" "$KVER_DIR/source" \
+                       "$KVER_DIR/vmlinux" "$KVER_DIR/System.map"
+          sudo find . \( -name "*.o" -o -name "*.cmd" -o -name ".tmp_*" \) -delete
+          # 瘦身：去调试段、去 BTF。段不存在时 objcopy 仅告警、退出码仍为 0，
+          # 这里再加 || true 只是防御，不影响构建。
+          sudo find . -name "*.ko" -exec strip --strip-debug {} \; || true
+          sudo find . -name "*.ko" -exec objcopy --remove-section .BTF {} \; || true
 
-          mkdir -p "$RELEASE_DIR"
+          # 与 rootfs 打包统一使用 numeric-owner；
+          # .ko 不含 file capability，因此不需要 --xattrs/--acls。
+          sudo tar --numeric-owner -zcf ../modules.tar.gz .
 
-          test -f "$KERNEL_DIR/arch/x86/boot/bzImage"
-          test -f "$KERNEL_DIR/.config"
+          ls -lh ../modules.tar.gz
+          echo "包内 .ko 数量: $(tar tzf ../modules.tar.gz | grep -c '\.ko$' || true)"
 
-          cp "$KERNEL_DIR/arch/x86/boot/bzImage" \
-             "$RELEASE_DIR/bzImage"
-
-          cp "$KERNEL_DIR/.config" \
-             "$RELEASE_DIR/config"
-
-          echo "=== Release files ==="
-          ls -lh "$RELEASE_DIR"
-
-      # 检查发布文件
-      - name: 检查发布文件
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_modules != false }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          cd "$GITHUB_WORKSPACE/release-files"
-
-          test -s bzImage
-          test -s config
-          test -s modules.tar.gz
-
-          echo "=== SHA256 ==="
-          sha256sum bzImage config modules.tar.gz
+          # 关键校验：包内顶层目录必须与 $KVER_DIR 一致，
+          # 把 "目录名 ≠ uname -r" 这类错当场拦下，而不是等到装机后模块加载失败。
+          PKG_KVER=$(tar tzf ../modules.tar.gz | sed 's|^\./||' | cut -d/ -f1 | grep -v '^$' | sort -u | head -1)
+          echo "包内顶层目录: $PKG_KVER"
+          if [ "$PKG_KVER" != "$KVER_DIR" ]; then
+            echo "ERROR: 包内顶层目录（$PKG_KVER）与预期（$KVER_DIR）不一致" >&2
+            exit 1
+          fi
+          echo "OK: 包结构与 uname -r 一致: $KVER_DIR"
           
       # 创建 GitHub Release
       - name: 创建发布并上传
@@ -386,7 +362,10 @@ jobs:
           name: kernel-${{ matrix.config_type }}-${{ env.KERNEL_VERSION }}
           allowUpdates: true
           replacesArtifacts: true
-          artifacts: "release-files/bzImage,release-files/config,release-files/modules.tar.gz"
+          artifacts: |
+            linux-${{ env.KERNEL_VERSION }}/arch/x86/boot/bzImage
+            ${{ github.workspace }}/config-${{ matrix.tag }}.txt
+            ${{ github.workspace }}/modules-staging/lib/modules.tar.gz
           body: | 
             音乐 Linux ${{ matrix.config_type }} ${{ env.KERNEL_VERSION }} x86_64 PREEMPT_RT 构建版本.
             上传清单:
