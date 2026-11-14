@@ -23,7 +23,7 @@ env:
 
 jobs:
   build_kernel:
-    name: ${{ matrix.config_type }} 编译
+    name: kernel-${{ matrix.config_type }} 编译
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:
@@ -35,12 +35,10 @@ jobs:
             KERNEL_CONFIG: j1800.conf
             KERNEL_SUFFIX: "-J1800"
             Verify-Config: "j1800-verify-config.sh"
-            BUILD_JOBS: 2
           # ---- RT 模块化：J1900&N3540 4内核定制----
           - config_type: J1900_N3540
             KERNEL_CONFIG: j1900&n3540.conf
             KERNEL_SUFFIX: "-J1900_N3540"
-            BUILD_JOBS: 4
             Verify-Config: "j1900-verify-config.sh"
 
     steps:
@@ -153,7 +151,8 @@ jobs:
           echo "defconfig 条目数: $COUNT0"
           
           # 2) 合并我们的增量配置片段（只写需要修改/额外开启的选项）
-          ./scripts/kconfig/merge_config.sh -m -O . .config FRAGMENT.config
+          #./scripts/kconfig/merge_config.sh -m -O . .config FRAGMENT.config
+          scripts/kconfig/merge_config.sh .config FRAGMENT.config
           
           # 3) 禁用证书相关选项，避免构建时报签名错误
           ./scripts/config --set-str SYSTEM_TRUSTED_KEYS ""
