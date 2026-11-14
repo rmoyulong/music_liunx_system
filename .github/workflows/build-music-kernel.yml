@@ -40,7 +40,7 @@ jobs:
           - config_type: J1900_N3540
             KERNEL_CONFIG: j1900&n3540.conf
             KERNEL_SUFFIX: "-J1900_N3540"
-            BUILD_JOBS: 3
+            BUILD_JOBS: 4
             Verify-Config: "j1900-verify-config.sh"
 
     steps:
@@ -260,8 +260,8 @@ jobs:
         run: |
           cd "linux-${KERNEL_VERSION}"
           export CC="ccache gcc"
-          ccache -M 2G
-          make ARCH=x86 -j"${BUILD_JOBS}" bzImage modules
+          ccache -M 3G
+          make ARCH=x86 -j"${nproc}" bzImage modules
           
       # 安装编译好的内核模块到暂存目录
       - name: 安装内核模块
