@@ -1,0 +1,398 @@
+================================================================================
+Linux 音频专用内核编译与 LMS + Squeezelite 系统调优完整指南
+适用硬件平台：Intel Celeron J1900 / Pentium N3540 (四核) & Celeron J1800 (双核)
+================================================================================
+
+目录：
+一、 Linux 音频专用内核核心优化思路
+二、 J1900 & N3540（四核）完整合并配置碎片（j1900_n3540_lms_audio.config）
+三、 J1800（双核）完整合并配置碎片（j1800_lms_audio.config）
+四、 内核编译、安装与 GRUB 引导参数配置
+五、 无 initramfs（直接引导内核）极速开机与网卡固件配置
+六、 Squeezelite 核心隔离绑定（Systemd 配置）
+七、 多机协同架构（J1900/N3540 做主服务器 + J1800 做纯音频网桥）
+八、 系统级一键调优与 USB DAC 硬件检测脚本（audio_tune.sh）
+
+
+--------------------------------------------------------------------------------
+一、 Linux 音频专用内核核心优化思路
+--------------------------------------------------------------------------------
+编译适用于高品质音频播放（LMS / Squeezelite）的 Linux 内核，核心目标是降低音频中断（Xruns/Dropouts）、减少系统抖动（Jitter），并剥离无用硬件干扰：
+1. 抢占模型（Preemption）：启用 CONFIG_PREEMPT=y（可抢占内核），显著降低音频线程调度延迟。
+2. 定时器频率（HZ）：设置为 CONFIG_HZ_1000=y（1000Hz，1ms 滴答间隔）并开启高精度定时器 CONFIG_HIGH_RES_TIMERS=y。
+3. 电源与频率锁定：默认锁定最高性能模式 CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y，并通过启动参数限制 CPU 深度休眠（C-State），消除降频与唤醒导致的爆音。
+4. 驱动内建（=y）：将 ALSA 核心、USB 音频驱动（CONFIG_SND_USB_AUDIO=y）、主板 USB 控制器及有线网卡驱动直接编入内核本体，减少模块加载延迟。
+5. 无头精简（Headless）：关闭重型 3D 显卡驱动（CONFIG_DRM_I915）、无线蓝牙、防火墙（NETFILTER）及内核调试选项。
+
+
+--------------------------------------------------------------------------------
+二、 J1900 & N3540（四核）完整合并配置碎片（j1900_n3540_lms_audio.config）
+--------------------------------------------------------------------------------
+# ==============================================================================
+# Intel J1900 / N3540 (Bay Trail) 专用 LMS + Squeezelite 低延迟音频内核配置
+# ==============================================================================
+
+# 1. 处理器架构与核心优化 (4核4线程, 无超线程)
+CONFIG_64BIT=y
+CONFIG_SMP=y
+CONFIG_NR_CPUS=4
+CONFIG_MCORE2=y
+# CONFIG_GENERIC_CPU is not set
+# CONFIG_NUMA is not set
+# CONFIG_SCHED_SMT is not set
+# CONFIG_CPU_MITIGATIONS is not set
+
+# 2. 抢占模型与高精度定时器 (低延迟音频核心)
+CONFIG_PREEMPT=y
+# CONFIG_PREEMPT_VOLUNTARY is not set
+# CONFIG_PREEMPT_NONE is not set
+CONFIG_PREEMPT_COUNT=y
+CONFIG_PREEMPTION=y
+CONFIG_HZ_1000=y
+CONFIG_HZ=1000
+CONFIG_HIGH_RES_TIMERS=y
+CONFIG_NO_HZ_IDLE=y
+
+# 3. 电源管理与性能锁定 (消除降频与深度休眠导致的爆音)
+CONFIG_CPU_FREQ=y
+CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
+CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
+CONFIG_X86_INTEL_PSTATE=y
+CONFIG_CPU_IDLE=y
+CONFIG_INTEL_IDLE=y
+# CONFIG_HIBERNATION is not set
+# CONFIG_SUSPEND is not set
+
+# 4. ALSA 音频子系统与外置 USB DAC 支持 (全部内建)
+CONFIG_SOUND=y
+CONFIG_SND=y
+CONFIG_SND_TIMER=y
+CONFIG_SND_PCM=y
+CONFIG_SND_HRTIMER=y
+CONFIG_SND_USB=y
+CONFIG_SND_USB_AUDIO=y
+CONFIG_SND_HDA_INTEL=y
+CONFIG_SND_HDA_CODEC_REALTEK=y
+# CONFIG_SND_OSS_EMUL is not set
+# CONFIG_SND_SEQUENCER is not set
+# CONFIG_SOUND_PRIME is not set
+
+# 5. USB 控制器内建 (Bay Trail 原生 USB 3.0 / 2.0)
+CONFIG_USB=y
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_EHCI_HCD=y
+CONFIG_USB_OHCI_HCD=y
+CONFIG_USB_STORAGE=y
+CONFIG_USB_UAS=y
+
+# 6. 有线网卡与 NAS 网络文件系统 (LMS 流媒体传输)
+CONFIG_NETDEVICES=y
+CONFIG_ETHERNET=y
+CONFIG_NET_VENDOR_REALTEK=y
+CONFIG_R8169=y
+CONFIG_NET_VENDOR_INTEL=y
+CONFIG_IGB=y
+CONFIG_E1000E=y
+CONFIG_NETWORK_FILESYSTEMS=y
+CONFIG_CIFS=y
+CONFIG_NFS_FS=y
+CONFIG_NFS_V4=y
+# CONFIG_NETFILTER is not set
+# CONFIG_WIRELESS is not set
+# CONFIG_BT is not set
+
+# 7. 存储控制器与本地音乐库文件系统
+CONFIG_ATA=y
+CONFIG_SATA_AHCI=y
+CONFIG_EXT4_FS=y
+CONFIG_F2FS_FS=y
+CONFIG_VFAT_FS=y
+CONFIG_EXFAT_FS=y
+CONFIG_NTFS3_FS=y
+
+# 8. 剥离 3D 显卡加速 (保留 UEFI 基础文本控制台)
+# CONFIG_DRM_I915 is not set
+CONFIG_FB=y
+CONFIG_FB_EFI=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+
+# 9. 精简虚拟化与内核调试开销
+# CONFIG_VIRTUALIZATION is not set
+# CONFIG_KVM is not set
+# CONFIG_DEBUG_KERNEL is not set
+# CONFIG_FTRACE is not set
+# CONFIG_PROFILING is not set
+
+
+--------------------------------------------------------------------------------
+三、 J1800（双核）完整合并配置碎片（j1800_lms_audio.config）
+--------------------------------------------------------------------------------
+# ==============================================================================
+# Intel Celeron J1800 (双核 Bay Trail) 专用 LMS + Squeezelite 低延迟音频内核配置
+# ==============================================================================
+
+# 1. 处理器架构与核心优化 (双核双线程, 1MB L2 缓存, 无超线程)
+CONFIG_64BIT=y
+CONFIG_SMP=y
+CONFIG_NR_CPUS=2
+CONFIG_MCORE2=y
+# CONFIG_GENERIC_CPU is not set
+# CONFIG_NUMA is not set
+# CONFIG_SCHED_SMT is not set
+# CONFIG_CPU_MITIGATIONS is not set
+
+# 2. 抢占模型与高精度定时器 (低延迟音频核心)
+CONFIG_PREEMPT=y
+# CONFIG_PREEMPT_VOLUNTARY is not set
+# CONFIG_PREEMPT_NONE is not set
+CONFIG_PREEMPT_COUNT=y
+CONFIG_PREEMPTION=y
+CONFIG_HZ_1000=y
+CONFIG_HZ=1000
+CONFIG_HIGH_RES_TIMERS=y
+CONFIG_NO_HZ_IDLE=y
+
+# 3. 电源管理与性能锁定 (消除双核降频与深度休眠导致的爆音)
+CONFIG_CPU_FREQ=y
+CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
+CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
+CONFIG_X86_INTEL_PSTATE=y
+CONFIG_CPU_IDLE=y
+CONFIG_INTEL_IDLE=y
+# CONFIG_HIBERNATION is not set
+# CONFIG_SUSPEND is not set
+
+# 4. ALSA 音频子系统与外置 USB DAC 支持 (全部内建)
+CONFIG_SOUND=y
+CONFIG_SND=y
+CONFIG_SND_TIMER=y
+CONFIG_SND_PCM=y
+CONFIG_SND_HRTIMER=y
+CONFIG_SND_USB=y
+CONFIG_SND_USB_AUDIO=y
+CONFIG_SND_HDA_INTEL=y
+CONFIG_SND_HDA_CODEC_REALTEK=y
+# CONFIG_SND_OSS_EMUL is not set
+# CONFIG_SND_SEQUENCER is not set
+# CONFIG_SOUND_PRIME is not set
+
+# 5. USB 控制器内建 (J1800 原生 USB 3.0 / 2.0)
+CONFIG_USB=y
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_EHCI_HCD=y
+CONFIG_USB_OHCI_HCD=y
+CONFIG_USB_STORAGE=y
+CONFIG_USB_UAS=y
+
+# 6. 有线网卡与 NAS 网络文件系统 (LMS 流媒体传输)
+CONFIG_NETDEVICES=y
+CONFIG_ETHERNET=y
+CONFIG_NET_VENDOR_REALTEK=y
+CONFIG_R8169=y
+CONFIG_NET_VENDOR_INTEL=y
+CONFIG_IGB=y
+CONFIG_E1000E=y
+CONFIG_NETWORK_FILESYSTEMS=y
+CONFIG_CIFS=y
+CONFIG_NFS_FS=y
+CONFIG_NFS_V4=y
+# CONFIG_NETFILTER is not set
+# CONFIG_WIRELESS is not set
+# CONFIG_BT is not set
+
+# 7. 存储控制器与本地音乐库文件系统
+CONFIG_ATA=y
+CONFIG_SATA_AHCI=y
+CONFIG_EXT4_FS=y
+CONFIG_F2FS_FS=y
+CONFIG_VFAT_FS=y
+CONFIG_EXFAT_FS=y
+CONFIG_NTFS3_FS=y
+
+# 8. 剥离 3D 显卡加速 (保留 UEFI 基础文本控制台)
+# CONFIG_DRM_I915 is not set
+CONFIG_FB=y
+CONFIG_FB_EFI=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+
+# 9. 精简虚拟化与内核调试开销
+# CONFIG_VIRTUALIZATION is not set
+# CONFIG_KVM is not set
+# CONFIG_DEBUG_KERNEL is not set
+# CONFIG_FTRACE is not set
+# CONFIG_PROFILING is not set
+
+
+--------------------------------------------------------------------------------
+四、 内核编译、安装与 GRUB 引导参数配置
+--------------------------------------------------------------------------------
+1. 合并配置并编译（进入内核源码目录）：
+   # J1900 / N3540（四核）：
+   make defconfig
+   ./scripts/kconfig/merge_config.sh .config j1900_n3540_lms_audio.config
+   make olddefconfig
+   make -j4
+   sudo make modules_install
+   sudo make install
+
+   # J1800（双核）：
+   make defconfig
+   ./scripts/kconfig/merge_config.sh .config j1800_lms_audio.config
+   make olddefconfig
+   make -j2
+   sudo make modules_install
+   sudo make install
+
+2. 更新 GRUB 引导参数（编辑 /etc/default/grub）：
+   # J1900 / N3540（隔离第 4 核心 CPU 3）：
+   GRUB_CMDLINE_LINUX_DEFAULT="quiet intel_idle.max_cstate=1 processor.max_cstate=1 isolcpus=3"
+
+   # J1800（隔离第 2 核心 CPU 1）：
+   GRUB_CMDLINE_LINUX_DEFAULT="quiet intel_idle.max_cstate=1 processor.max_cstate=1 isolcpus=1"
+
+   更新引导并重启：
+   sudo update-grub
+   sudo reboot
+
+
+--------------------------------------------------------------------------------
+五、 无 initramfs（直接引导内核）极速开机与网卡固件配置
+--------------------------------------------------------------------------------
+1. 检查网卡芯片与加载的固件文件名：
+   lspci -nnk | grep -iA 3 "ethernet"
+   sudo dmesg | grep -iE "r8169|igb|e1000e|firmware"
+   * Intel 网卡（igb / e1000e）无需外部固件。
+   * Realtek 网卡（r8169）若提示加载如 rtl_nic/rtl8168g-2.fw，需在内核配置中追加：
+     CONFIG_FW_LOADER=y
+     CONFIG_EXTRA_FIRMWARE="rtl_nic/rtl8168g-2.fw"
+     CONFIG_EXTRA_FIRMWARE_DIR="/lib/firmware"
+     CONFIG_BLK_DEV_SD=y
+     CONFIG_SATA_AHCI=y
+     CONFIG_EXT4_FS=y
+
+2. 查询根分区 PARTUUID：
+   findmnt -no SOURCE,PARTUUID /
+
+3. 配置 /etc/default/grub 禁用 initrd：
+   GRUB_DISABLE_INITRD=true
+   GRUB_DISABLE_LINUX_UUID=true
+   GRUB_CMDLINE_LINUX_DEFAULT="root=PARTUUID=<你的实际PARTUUID> rw quiet intel_idle.max_cstate=1 processor.max_cstate=1 isolcpus=3"
+   （注：J1800 请将 isolcpus=3 改为 isolcpus=1）
+   执行 sudo update-grub 生效。
+
+
+--------------------------------------------------------------------------------
+六、 Squeezelite 核心隔离绑定（Systemd 配置）
+--------------------------------------------------------------------------------
+1. 执行 sudo systemctl edit squeezelite 并写入：
+   [Service]
+   # J1900/N3540 填 3，J1800 填 1
+   CPUAffinity=3
+   CPUSchedulingPolicy=fifo
+   CPUSchedulingPriority=85
+   LimitMEMLOCK=infinity
+
+2. 编辑 /etc/default/squeezelite（Arch 为 /etc/squeezelite.conf）：
+   SL_SOUNDCARD="hw:CARD=YourDAC,DEV=0"
+   SB_EXTRA_ARGS="-a 80:4::1 -p 85 -C 5"
+
+3. 重载并验证核心绑定（PSR 列应全部显示为 3 或 1）：
+   sudo systemctl daemon-reload
+   sudo systemctl restart squeezelite
+   ps -mo pid,tid,psr,cls,rtprio,comm -C squeezelite
+
+
+--------------------------------------------------------------------------------
+七、 多机协同架构（J1900/N3540 做主服务器 + J1800 做纯音频网桥）
+--------------------------------------------------------------------------------
+1. 角色分工：
+   * J1900 / N3540（四核）：运行 Lyrion Music Server (LMS) 中心服务、挂载本地磁盘/NAS、兼任客厅转盘（CPU 0-2 运行 LMS，CPU 3 运行本地 Squeezelite）。
+   * J1800（双核）：纯音频网桥（Pure Endpoint），禁用本地 LMS 服务（sudo systemctl disable --now logitechmediaserver lyrionmusicserver），仅运行 Squeezelite（CPU 0 处理网络/USB 中断，CPU 1 独占音频播放）。
+
+2. J1800 网桥端 /etc/default/squeezelite 优化参数：
+   SL_NAME="J1800-Bridge"
+   SL_SOUNDCARD="hw:CARD=DAC,DEV=0"
+   # -s 指定主服务器固定 IP；-b 4096:8192 增大网络流与输出缓冲
+   SB_EXTRA_ARGS="-s 192.168.1.100 -b 4096:8192 -a 80:4::1 -p 85 -C 5"
+
+3. LMS 中心服务器设置建议：
+   * 文件类型（File Types）：FLAC / WAV / AIFF 保持原生（Native）直传；DSD 开启 Native DSD 或 DoP。
+   * 多房间同步（Synchronize）：若多机同时发声有微弱回声，在“高级 -> 音频 -> 播放器启动延迟”中以 1ms 为步进微调延迟。
+   * 网线建议：使用超五类或六类非屏蔽网线（UTP）连接千兆交换机，避免屏蔽层引发地线环路底噪。
+
+
+--------------------------------------------------------------------------------
+八、 系统级一键调优与 USB DAC 硬件检测脚本（audio_tune.sh）
+--------------------------------------------------------------------------------
+保存为 audio_tune.sh，赋予权限 chmod +x audio_tune.sh 后使用 sudo ./audio_tune.sh 运行：
+
+#!/usr/bin/env bash
+set -e
+
+if [[ $EUID -ne 0 ]]; then
+   echo "错误：请使用 sudo 或 root 权限运行此脚本 (sudo bash audio_tune.sh)"
+   exit 1
+fi
+
+echo "=========================================================="
+echo "   Linux 专用音频系统一键调优与 USB DAC 硬件检测工具"
+echo "=========================================================="
+
+# 1. 写入网络与内存低延迟 sysctl 参数
+echo "[1/4] 正在配置内核网络缓冲区与内存低延迟参数..."
+cat << 'EOF' > /etc/sysctl.d/99-audio-tune.conf
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.ipv4.tcp_slow_start_after_idle = 0
+vm.swappiness = 0
+EOF
+
+sysctl --system > /dev/null
+echo "      -> sysctl 参数已应用生效。"
+
+# 2. 关闭 Swap 并注释 /etc/fstab 中的 swap 项
+echo "[2/4] 正在禁用 Swap 交换分区..."
+swapoff -a 2>/dev/null || true
+if grep -qE '^[^#].*\sswap\s' /etc/fstab; then
+    cp /etc/fstab /etc/fstab.bak.audio
+    sed -i -E 's/^([^#].*\sswap\s.*)/#/' /etc/fstab
+    echo "      -> 已禁用 Swap 并备份原 fstab 至 /etc/fstab.bak.audio。"
+else
+    echo "      -> 系统当前未启用持久化 Swap，无需修改。"
+fi
+
+# 3. 强制锁定所有 CPU 核心为 performance 模式
+echo "[3/4] 正在锁定 CPU 频率调节器为 performance..."
+if ls /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 1> /dev/null 2>&1; then
+    for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        echo "performance" > "$gov" 2>/dev/null || true
+    done
+    echo "      -> 当前 CPU 频率模式: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)"
+else
+    echo "      -> 未检测到 cpufreq 接口（可能已在 BIOS 锁定全速）。"
+fi
+
+# 4. 扫描声卡与 USB DAC 硬件能力
+echo "[4/4] 正在检测系统声卡与 USB DAC 硬件参数..."
+echo "----------------------------------------------------------"
+if command -v aplay >/dev/null 2>&1; then
+    aplay -l | grep -E "^card " || echo "未检测到播放设备！"
+else
+    echo "提示：未找到 aplay 命令，建议安装 alsa-utils"
+fi
+echo "----------------------------------------------------------"
+
+for card_dir in /proc/asound/card*; do
+    if [[ -f "$card_dir/stream0" ]]; then
+        card_id=$(cat "$card_dir/id")
+        echo "发现 USB 音频设备: [ $card_id ]"
+        echo "建议 Squeezelite 设备参数: SL_SOUNDCARD="hw:CARD=${card_id},DEV=0""
+        echo "硬件支持格式与采样率详情:"
+        grep -E "Interface|Format:|Rates:|Channels:" "$card_dir/stream0" | sed 's/^/  /'
+        echo "----------------------------------------------------------"
+    fi
+done
+
+echo "调优与检测完成！建议重启一次系统以验证所有持久化设置。"
