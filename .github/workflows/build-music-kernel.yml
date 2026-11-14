@@ -141,7 +141,7 @@ jobs:
           
  
           # 1) 从官方 x86_64 默认配置起步（约 1700 个 =y/=m 条目，完整可启动）
-          #make x86_64_defconfig
+          make x86_64_defconfig
           #COUNT0=$(grep -c '^CONFIG_[A-Za-z0-9_]\+=' .config)
           #echo "defconfig 条目数: $COUNT0"
           
