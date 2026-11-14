@@ -144,16 +144,16 @@ jobs:
           cd "linux-${KERNEL_VERSION}"
           FRAGMENT="${{ github.workspace }}/${{ env.KERNEL_PATH }}/${{ matrix.KERNEL_CONFIG }}"
           test -f "$FRAGMENT" || { echo "::error::缺少配置片段 $FRAGMENT"; exit 1; }
-          cp "$FRAGMENT" old.config
+          cp "$FRAGMENT" .config
           
  
           # 1) 从官方 x86_64 默认配置起步（约 1700 个 =y/=m 条目，完整可启动）
-          make x86_64_defconfig
-          COUNT0=$(grep -c '^CONFIG_[A-Za-z0-9_]\+=' .config)
-          echo "defconfig 条目数: $COUNT0"
+          #make x86_64_defconfig
+          #COUNT0=$(grep -c '^CONFIG_[A-Za-z0-9_]\+=' .config)
+          #echo "defconfig 条目数: $COUNT0"
           
           # 2) 合并我们的增量配置片段（只写需要修改/额外开启的选项）
-          ./scripts/kconfig/merge_config.sh -m -O . .config old.config
+          #./scripts/kconfig/merge_config.sh -m -O . .config old.config
           #scripts/kconfig/merge_config.sh .config old.config
           
           # 3) 禁用证书相关选项，避免构建时报签名错误
@@ -225,7 +225,7 @@ jobs:
           make olddefconfig
           
           # 4) 最后一次依赖补齐，并让 kconfig 报告写错的符号名
-          KCONFIG_WARN_UNKNOWN_SYMBOLS=1 make olddefconfig
+          #KCONFIG_WARN_UNKNOWN_SYMBOLS=1 make olddefconfig
           
           # ---- 压缩算法断言：必须 zstd ----
           # KERNEL_GZIP / KERNEL_ZSTD 是同一 choice 组的成员。若片段里的
