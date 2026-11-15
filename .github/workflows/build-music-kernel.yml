@@ -204,6 +204,8 @@ jobs:
           ./scripts/config --enable HIGH_RES_TIMERS
           ./scripts/config --enable SND_ALOOP
           ./scripts/config --enable SND_PCI
+          ./scripts/config --enable SND_USB
+          ./scripts/config --enable SND_USB_AUDIO
           
           # Intel HDA stack: modules.
           
