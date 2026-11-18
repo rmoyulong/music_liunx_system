@@ -16,7 +16,7 @@ on:
 permissions:
   contents: write
 env:
-  KERNEL_VERSION: 7.3.4
+  KERNEL_VERSION: 7.3.5
   ARCH: x86
   KERNEL_PATH: "config"
   
